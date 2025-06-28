@@ -295,7 +295,8 @@ mod tests {
 
     #[test]
     fn test_builder_methods() {
-        let update = ProgressUpdate::new(100, 50, State::Working, Some("Half complete".to_string()));
+        let update =
+            ProgressUpdate::new(100, 50, State::Working, Some("Half complete".to_string()));
 
         assert_eq!(update.current(), 50);
         assert_eq!(update.message(), Some("Half complete"));
