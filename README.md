@@ -16,7 +16,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-progressor = "0.1"
+progressor = "0.0.1"
 ```
 
 ### Basic Example

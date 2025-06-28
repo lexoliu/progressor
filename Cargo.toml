@@ -1,6 +1,6 @@
 [package]
 name = "progressor"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 license = "MIT"
 description = "A modern, async-first progress tracking library"
@@ -9,6 +9,11 @@ keywords = ["async", "progress", "tracking", "stream"]
 categories = ["asynchronous", "development-tools"]
 authors = ["Lexo Liu <me@lexo.cool>"]
 readme = "README.md"
+exclude = [
+    ".github/",
+    ".gitignore",
+    "target/",
+]
 
 [package.metadata.docs.rs]
 all-features = true
