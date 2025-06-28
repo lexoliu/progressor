@@ -15,6 +15,7 @@ use crate::{Progress, ProgressUpdate};
 /// This struct allows you to report progress updates that will be broadcast
 /// to listeners via the progress stream. It maintains internal state and
 /// automatically handles cancellation when dropped.
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 #[derive(Debug, Clone)]
 pub struct ProgressUpdater {
     state: ProgressUpdate,
@@ -99,7 +100,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use progressor::{updater::progress, Progress};
+/// use progressor::{progress, Progress};
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() {
@@ -116,6 +117,7 @@ where
 /// // ... handle progress updates
 /// # }
 /// ```
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub fn progress<F, Fut>(total: u64, f: F) -> impl Progress<Output = Fut::Output>
 where
     F: FnOnce(ProgressUpdater) -> Fut,

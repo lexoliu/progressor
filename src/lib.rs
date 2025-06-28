@@ -20,9 +20,14 @@
 //! # }
 //! ```
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 #[cfg(feature = "std")]
-/// Progress updater utilities for creating progress-tracked futures.
-pub mod updater;
+mod updater;
+
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+pub use updater::{progress, ProgressUpdater};
 
 use core::future::Future;
 use futures_core::Stream;

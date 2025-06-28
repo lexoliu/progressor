@@ -3,12 +3,16 @@ name = "progressor"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "A modern progress tracking crate"
+description = "A modern, async-first progress tracking library"
 repository = "https://github.com/lexoliu/progressor"
 keywords = ["async", "progress", "tracking", "stream"]
 categories = ["asynchronous", "development-tools"]
 authors = ["Lexo Liu <me@lexo.cool>"]
 readme = "README.md"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 async-broadcast = { version = "0.7.2", optional = true }
