@@ -55,8 +55,8 @@
 //!     "Task completed!"
 //! });
 //!
-//! // Monitor progress concurrently
-//! let mut progress_stream = Box::pin(task.progress());
+//! // Monitor progress concurrently - no need for Box::pin with Unpin
+//! let mut progress_stream = task.progress();
 //! tokio::select! {
 //!     result = task => {
 //!         println!("Result: {}", result);
@@ -95,7 +95,7 @@ pub trait Progress: Future {
     ///
     /// The stream will emit [`ProgressUpdate`] instances as the operation progresses.
     /// The stream should be polled concurrently with the future to receive updates.
-    fn progress(&self) -> impl Stream<Item = ProgressUpdate> + Send + 'static;
+    fn progress(&self) -> impl Stream<Item = ProgressUpdate> + Unpin + Send + 'static;
 }
 
 /// Represents a single progress update with current status, total, and optional metadata.

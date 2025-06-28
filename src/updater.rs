@@ -140,8 +140,8 @@ where
 ///     "completed"
 /// });
 ///
-/// // Monitor progress
-/// let mut progress_stream = Box::pin(task.progress());
+/// // Monitor progress - no need for Box::pin with Unpin
+/// let mut progress_stream = task.progress();
 /// while let Some(update) = progress_stream.next().await {
 ///     match update.state {
 ///         State::Working => println!("Progress: {}%", (update.completed_fraction() * 100.0) as u32),

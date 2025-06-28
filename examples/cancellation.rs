@@ -44,8 +44,8 @@ async fn main() {
         "Task completed successfully!"
     });
 
-    // Get the progress stream
-    let mut progress_stream = Box::pin(task.progress());
+    // Get the progress stream - no need for Box::pin with Unpin
+    let mut progress_stream = task.progress();
 
     // Run task and progress monitoring concurrently
     tokio::select! {
