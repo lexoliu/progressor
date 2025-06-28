@@ -8,6 +8,7 @@ repository = "https://github.com/lexoliu/progressor"
 keywords = ["async", "progress", "tracking", "stream"]
 categories = ["asynchronous", "development-tools"]
 authors = ["Lexo Liu <me@lexo.cool>"]
+readme = "README.md"
 
 [dependencies]
 async-broadcast = { version = "0.7.2", optional = true }
@@ -21,3 +22,15 @@ futures-util = "0.3"
 [features]
 default = ["std"]
 std = ["dep:async-broadcast","dep:pin-project-lite"]
+
+[lints]
+rust.missing_docs = "warn"
+clippy.all = "warn"
+clippy.style = "warn"
+clippy.correctness = "warn"
+clippy.complexity = "warn"
+clippy.suspicious = "warn"
+clippy.perf = "warn"
+clippy.pedantic = "warn"
+clippy.nursery = "warn"
+clippy.cargo = "warn"

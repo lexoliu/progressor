@@ -1,3 +1,5 @@
+//! Basic example demonstrating progress tracking functionality.
+
 use futures_util::StreamExt;
 use progressor::{updater::progress, Progress};
 
@@ -28,7 +30,7 @@ async fn main() {
         result = task => {
             println!("\nTask result: {result}");
         }
-        _ = async {
+        () = async {
             while let Some(update) = progress_stream.next().await {
                 print!("\rProgress: {:.1}% ({}/{})",
                        update.completed_fraction() * 100.0,
