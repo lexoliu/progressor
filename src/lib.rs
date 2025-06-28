@@ -1,12 +1,23 @@
 //! A modern, async-first progress tracking library for Rust.
 //!
 //! This crate provides types and utilities for tracking progress of long-running operations
-//! in an async context. It uses Rust's `Stream` API to emit progress updates.
+//! in an async context. It uses Rust's `Stream` API to emit progress updates with support for
+//! different states (working, paused, completed, cancelled).
+//!
+//! # Features
+//!
+//! - **State-aware progress tracking**: Support for working, paused, completed, and cancelled states
+//! - **Async-first design**: Built around `Future` and `Stream` APIs
+//! - **Zero-cost abstractions**: Efficient progress reporting with minimal overhead
+//! - **Type-safe**: Full Rust type safety with meaningful error messages
+//! - **Flexible**: Support for current/total values, custom messages, and state management
 //!
 //! # Examples
 //!
+//! Basic usage with progress updates:
+//!
 //! ```
-//! use progressor::{Progress, ProgressUpdate};
+//! use progressor::{Progress, ProgressUpdate, State};
 //! use futures_util::StreamExt;
 //!
 //! # async fn example() {
@@ -17,6 +28,49 @@
 //!
 //! assert_eq!(update.completed_fraction(), 0.5);
 //! assert_eq!(update.remaining(), 50);
+//! assert_eq!(update.state, State::Working);
+//! # }
+//! ```
+//!
+//! Using the progress tracker with a long-running task:
+//!
+//! ```
+//! # #[cfg(feature = "std")]
+//! # {
+//! use progressor::{progress, Progress};
+//! use futures_util::StreamExt;
+//!
+//! # async fn example() {
+//! let task = progress(100, |mut updater| async move {
+//!     for i in 0..=100 {
+//!         // Update progress
+//!         updater.update(i);
+//!         
+//!         // Check if we should pause or cancel
+//!         if i == 50 {
+//!             updater.pause();
+//!             // Resume later...
+//!         }
+//!     }
+//!     "Task completed!"
+//! });
+//!
+//! // Monitor progress concurrently
+//! let mut progress_stream = Box::pin(task.progress());
+//! tokio::select! {
+//!     result = task => {
+//!         println!("Result: {}", result);
+//!     }
+//!     _ = async {
+//!         while let Some(update) = progress_stream.next().await {
+//!             println!("Progress: {}%", (update.completed_fraction() * 100.0) as u32);
+//!             if update.state.is_paused() {
+//!                 println!("Task is paused");
+//!             }
+//!         }
+//!     } => {}
+//! }
+//! # }
 //! # }
 //! ```
 
@@ -47,30 +101,96 @@ pub trait Progress: Future {
 /// Represents a single progress update with current status, total, and optional metadata.
 ///
 /// This struct contains all the information about the current state of a progress-tracked operation,
-/// including the current value, total value, cancellation status, and an optional message.
+/// including the current value, total value, execution state, and an optional message.
+///
+/// # Examples
+///
+/// ```
+/// use progressor::{ProgressUpdate, State};
+///
+/// let mut update = ProgressUpdate::new(100)
+///     .with_current(25)
+///     .with_message("Processing...");
+///
+/// assert_eq!(update.current, 25);
+/// assert_eq!(update.total, 100);
+/// assert_eq!(update.state, State::Working);
+/// assert_eq!(update.completed_fraction(), 0.25);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProgressUpdate {
     /// The current progress value (e.g., bytes downloaded, items processed).
     pub current: u64,
     /// The total expected value when the operation will be complete.
     pub total: u64,
-    /// Whether the operation has been cancelled.
-    pub is_cancelled: bool,
+    /// The current state of the progress-tracked operation.
+    pub state: State,
     /// An optional descriptive message about the current progress.
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Represents the state of a progress-tracked operation.
+pub enum State {
+    /// The operation is in progress.
+    Working,
+    /// The operation has been completed successfully.
+    Completed,
+    /// The operation has been paused.
+    Paused,
+    /// The operation has been cancelled.
+    Cancelled,
+}
+
+impl State {
+    /// Returns `true` if the state is [`Cancelled`](State::Cancelled).
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
+
+    /// Returns `true` if the state is [`Working`](State::Working).
+    #[must_use]
+    pub const fn is_working(&self) -> bool {
+        matches!(self, Self::Working)
+    }
+
+    /// Returns `true` if the state is [`Completed`](State::Completed).
+    #[must_use]
+    pub const fn is_completed(&self) -> bool {
+        matches!(self, Self::Completed)
+    }
+
+    /// Returns `true` if the state is [`Paused`](State::Paused).
+    #[must_use]
+    pub const fn is_paused(&self) -> bool {
+        matches!(self, Self::Paused)
+    }
 }
 
 impl ProgressUpdate {
     /// Creates a new progress update with the given total.
     ///
-    /// The current progress is initialized to 0, and the operation is not cancelled.
-    /// No message is set initially.
+    /// The current progress is initialized to 0, the state is set to [`State::Working`],
+    /// and no message is set initially.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use progressor::{ProgressUpdate, State};
+    ///
+    /// let update = ProgressUpdate::new(100);
+    /// assert_eq!(update.current, 0);
+    /// assert_eq!(update.total, 100);
+    /// assert_eq!(update.state, State::Working);
+    /// assert_eq!(update.message, None);
+    /// ```
     #[must_use]
     pub const fn new(total: u64) -> Self {
         Self {
             current: 0,
             total,
-            is_cancelled: false,
+            state: State::Working,
             message: None,
         }
     }
@@ -108,19 +228,13 @@ impl ProgressUpdate {
         self
     }
 
-    /// Sets the cancellation status.
+    /// Sets the state of the progress update.
     ///
     /// This is a builder method that consumes and returns `self`.
     #[must_use]
-    pub const fn with_cancelled(mut self, cancelled: bool) -> Self {
-        self.is_cancelled = cancelled;
+    pub const fn with_state(mut self, state: State) -> Self {
+        self.state = state;
         self
-    }
-
-    /// Returns `true` if the current progress is greater than or equal to the total.
-    #[must_use]
-    pub const fn is_complete(&self) -> bool {
-        self.current >= self.total
     }
 
     /// Returns the remaining progress (total - current).
@@ -129,6 +243,30 @@ impl ProgressUpdate {
     #[must_use]
     pub const fn remaining(&self) -> u64 {
         self.total.saturating_sub(self.current)
+    }
+
+    /// Returns `true` if the state is [`Cancelled`](State::Cancelled).
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        matches!(self.state, State::Cancelled)
+    }
+
+    /// Returns `true` if the state is [`Working`](State::Working).
+    #[must_use]
+    pub const fn is_working(&self) -> bool {
+        matches!(self.state, State::Working)
+    }
+
+    /// Returns `true` if the state is [`Completed`](State::Completed).
+    #[must_use]
+    pub const fn is_completed(&self) -> bool {
+        matches!(self.state, State::Completed)
+    }
+
+    /// Returns `true` if the state is [`Paused`](State::Paused).
+    #[must_use]
+    pub const fn is_paused(&self) -> bool {
+        matches!(self.state, State::Paused)
     }
 }
 
@@ -141,7 +279,7 @@ mod tests {
         let update = ProgressUpdate::new(100);
         assert_eq!(update.current, 0);
         assert_eq!(update.total, 100);
-        assert!(!update.is_cancelled);
+        assert!(!update.is_cancelled());
         assert_eq!(update.message, None);
     }
 
@@ -168,23 +306,35 @@ mod tests {
         let update = ProgressUpdate::new(100)
             .with_current(50)
             .with_message("Half complete")
-            .with_cancelled(false);
+            .with_state(State::Working);
 
         assert_eq!(update.current, 50);
         assert_eq!(update.message, Some("Half complete".to_string()));
-        assert!(!update.is_cancelled);
+        assert_eq!(update.state, State::Working);
+        assert!(update.is_working());
+        assert!(!update.is_cancelled());
+        assert!(!update.is_completed());
+        assert!(!update.is_paused());
     }
 
     #[test]
     fn test_is_complete() {
         let mut update = ProgressUpdate::new(100);
-        assert!(!update.is_complete());
+        assert!(!update.is_completed());
+        assert!(update.is_working());
 
-        update.current = 100;
-        assert!(update.is_complete());
+        // Setting state to completed
+        update.state = State::Completed;
+        assert!(update.is_completed());
 
-        update.current = 150; // exceeding total should also be considered complete
-        assert!(update.is_complete());
+        // Test other states
+        update.state = State::Cancelled;
+        assert!(update.is_cancelled());
+        assert!(!update.is_completed());
+
+        update.state = State::Paused;
+        assert!(update.is_paused());
+        assert!(!update.is_completed());
     }
 
     #[test]

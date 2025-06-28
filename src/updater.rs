@@ -8,7 +8,7 @@ use async_broadcast::{broadcast, Receiver, Sender};
 use futures_core::Stream;
 use pin_project_lite::pin_project;
 
-use crate::{Progress, ProgressUpdate};
+use crate::{Progress, ProgressUpdate, State};
 
 /// A handle for updating progress during execution of a future.
 ///
@@ -34,6 +34,7 @@ impl ProgressUpdater {
     /// This will broadcast the update to all progress stream listeners.
     /// The message will be included in the progress update.
     pub fn update_with_message(&mut self, current: u64, message: impl Into<String>) {
+        self.state.state = State::Working;
         self.state.current = current;
         self.state.message = Some(message.into());
         let _ = self.sender.try_broadcast(self.state.clone());
@@ -44,16 +45,38 @@ impl ProgressUpdater {
     /// This will broadcast the update to all progress stream listeners.
     /// Any previous message will be cleared.
     pub fn update(&mut self, current: u64) {
+        self.state.state = State::Working;
         self.state.current = current;
         self.state.message = None;
         let _ = self.sender.try_broadcast(self.state.clone());
+    }
+
+    /// Pauses the progress operation.
+    ///
+    /// This method sets the progress state to paused and broadcasts the update to all listeners.
+    pub fn pause(&mut self) {
+        self.state.state = State::Paused;
+        let _ = self.sender.try_broadcast(self.state.clone());
+    }
+
+    /// Cancels the progress operation.
+    ///
+    /// This method signals cancellation; actual cancellation is handled automatically when the updater is dropped.
+    pub fn cancel(self) {
+        // Drop will handle cancellation automatically
+    }
+
+    /// Gets the current progress state.
+    #[must_use]
+    pub const fn current_progress(&self) -> &ProgressUpdate {
+        &self.state
     }
 }
 
 impl Drop for ProgressUpdater {
     fn drop(&mut self) {
-        if !self.state.is_cancelled {
-            self.state.is_cancelled = true;
+        if !self.state.is_completed() {
+            self.state.state = State::Cancelled;
             let _ = self.sender.try_broadcast(self.state.clone());
         }
     }
@@ -100,13 +123,18 @@ where
 /// # Examples
 ///
 /// ```
-/// use progressor::{progress, Progress};
+/// use progressor::{progress, Progress, State};
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() {
 /// let task = progress(100, |mut updater| async move {
 ///     for i in 0..=100 {
-///         updater.update(i);
+///         if i == 50 {
+///             // Pause at halfway point
+///             updater.pause();
+///         } else {
+///             updater.update(i);
+///         }
 ///         // Do some work...
 ///     }
 ///     "completed"
@@ -114,7 +142,14 @@ where
 ///
 /// // Monitor progress
 /// let mut progress_stream = Box::pin(task.progress());
-/// // ... handle progress updates
+/// while let Some(update) = progress_stream.next().await {
+///     match update.state {
+///         State::Working => println!("Progress: {}%", (update.completed_fraction() * 100.0) as u32),
+///         State::Paused => println!("Task paused at {}%", (update.completed_fraction() * 100.0) as u32),
+///         State::Completed => println!("Task completed!"),
+///         State::Cancelled => println!("Task cancelled!"),
+///     }
+/// }
 /// # }
 /// ```
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
