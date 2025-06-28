@@ -10,13 +10,6 @@ async fn main() {
     // Create a task that can be paused and cancelled
     let task = progress(100, |mut updater| async move {
         for i in 0..=100 {
-            // Check current state
-            let current_state = updater.current_progress().state;
-            if current_state.is_cancelled() {
-                println!("\n🚫 Task was cancelled at step {i}");
-                return "Task cancelled";
-            }
-
             // Simulate some work
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -56,14 +49,14 @@ async fn main() {
             while let Some(update) = progress_stream.next().await {
                 print!("\rProgress: {:.1}% ({}/{})",
                        update.completed_fraction() * 100.0,
-                       update.current,
-                       update.total);
+                       update.current(),
+                       update.total());
 
-                if let Some(message) = &update.message {
+                if let Some(message) = update.message() {
                     print!(" - {message}");
                 }
 
-                match update.state {
+                match update.state() {
                     State::Working => {
                         // Continue normal progress display
                     }

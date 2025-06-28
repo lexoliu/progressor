@@ -14,25 +14,7 @@
 //!
 //! # Examples
 //!
-//! Basic usage with progress updates:
-//!
-//! ```
-//! use progressor::{Progress, ProgressUpdate, State};
-//! use futures_util::StreamExt;
-//!
-//! # async fn example() {
-//! // Create a progress update
-//! let update = ProgressUpdate::new(100)
-//!     .with_current(50)
-//!     .with_message("Half complete");
-//!
-//! assert_eq!(update.completed_fraction(), 0.5);
-//! assert_eq!(update.remaining(), 50);
-//! assert_eq!(update.state, State::Working);
-//! # }
-//! ```
-//!
-//! Using the progress tracker with a long-running task:
+//! Basic usage with the progress tracker:
 //!
 //! ```
 //! # #[cfg(feature = "std")]
@@ -46,16 +28,15 @@
 //!         // Update progress
 //!         updater.update(i);
 //!         
-//!         // Check if we should pause or cancel
-//!         if i == 50 {
-//!             updater.pause();
-//!             // Resume later...
+//!         // Add messages for important milestones
+//!         if i % 25 == 0 {
+//!             updater.update_with_message(i, format!("Milestone: {}%", i));
 //!         }
 //!     }
 //!     "Task completed!"
 //! });
 //!
-//! // Monitor progress concurrently - no need for Box::pin with Unpin
+//! // Monitor progress concurrently
 //! let mut progress_stream = task.progress();
 //! tokio::select! {
 //!     result = task => {
@@ -64,11 +45,49 @@
 //!     _ = async {
 //!         while let Some(update) = progress_stream.next().await {
 //!             println!("Progress: {}%", (update.completed_fraction() * 100.0) as u32);
-//!             if update.state.is_paused() {
-//!                 println!("Task is paused");
+//!             if let Some(message) = update.message() {
+//!                 println!("  {}", message);
 //!             }
 //!         }
 //!     } => {}
+//! }
+//! # }
+//! # }
+//! ```
+//!
+//! Advanced usage with pause and cancel:
+//!
+//! ```
+//! # #[cfg(feature = "std")]
+//! # {
+//! use progressor::{progress, Progress, State};
+//! use futures_util::StreamExt;
+//!
+//! # async fn example() {
+//! let task = progress(100, |mut updater| async move {
+//!     for i in 0..=100 {
+//!         // Update progress
+//!         updater.update(i);
+//!         
+//!         // Pause at 50%
+//!         if i == 50 {
+//!             updater.pause();
+//!             // Simulate some async work during pause
+//!             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+//!         }
+//!     }
+//!     "Task completed!"
+//! });
+//!
+//! // Monitor progress and handle different states
+//! let mut progress_stream = task.progress();
+//! while let Some(update) = progress_stream.next().await {
+//!     match update.state() {
+//!         State::Working => println!("Working: {}%", (update.completed_fraction() * 100.0) as u32),
+//!         State::Paused => println!("Paused at {}%", (update.completed_fraction() * 100.0) as u32),
+//!         State::Completed => println!("Completed!"),
+//!         State::Cancelled => println!("Cancelled!"),
+//!     }
 //! }
 //! # }
 //! # }
@@ -100,33 +119,19 @@ pub trait Progress: Future {
 
 /// Represents a single progress update with current status, total, and optional metadata.
 ///
-/// This struct contains all the information about the current state of a progress-tracked operation,
-/// including the current value, total value, execution state, and an optional message.
+/// This struct contains all the information about the current state of a progress-tracked operation.
+/// It is emitted by progress streams and provides methods to query the current progress state.
 ///
-/// # Examples
+/// You typically don't create instances of this struct directly. Instead, use the [`progress`] function
+/// to create progress-tracked tasks, and receive `ProgressUpdate` instances from the progress stream.
 ///
-/// ```
-/// use progressor::{ProgressUpdate, State};
-///
-/// let mut update = ProgressUpdate::new(100)
-///     .with_current(25)
-///     .with_message("Processing...");
-///
-/// assert_eq!(update.current, 25);
-/// assert_eq!(update.total, 100);
-/// assert_eq!(update.state, State::Working);
-/// assert_eq!(update.completed_fraction(), 0.25);
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// [`progress`]: crate::progress
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProgressUpdate {
-    /// The current progress value (e.g., bytes downloaded, items processed).
-    pub current: u64,
-    /// The total expected value when the operation will be complete.
-    pub total: u64,
-    /// The current state of the progress-tracked operation.
-    pub state: State,
-    /// An optional descriptive message about the current progress.
-    pub message: Option<String>,
+    current: u64,
+    total: u64,
+    state: State,
+    message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -169,30 +174,32 @@ impl State {
 }
 
 impl ProgressUpdate {
-    /// Creates a new progress update with the given total.
+    /// Creates a new progress update.
     ///
-    /// The current progress is initialized to 0, the state is set to [`State::Working`],
-    /// and no message is set initially.
+    /// This method is primarily used internally by the progress tracking system.
+    /// Users should use the [`progress`] function instead of creating updates manually.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use progressor::{ProgressUpdate, State};
-    ///
-    /// let update = ProgressUpdate::new(100);
-    /// assert_eq!(update.current, 0);
-    /// assert_eq!(update.total, 100);
-    /// assert_eq!(update.state, State::Working);
-    /// assert_eq!(update.message, None);
-    /// ```
+    /// [`progress`]: crate::progress
     #[must_use]
-    pub const fn new(total: u64) -> Self {
+    pub const fn new(total: u64, current: u64, state: State, message: Option<String>) -> Self {
         Self {
-            current: 0,
+            current,
             total,
-            state: State::Working,
-            message: None,
+            state,
+            message,
         }
+    }
+
+    /// Returns the total expected value when the operation will be complete.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.total
+    }
+
+    /// Returns the current progress value.
+    #[must_use]
+    pub const fn current(&self) -> u64 {
+        self.current
     }
 
     /// Returns the completion fraction as a value between 0.0 and 1.0.
@@ -208,33 +215,6 @@ impl ProgressUpdate {
                 self.current as f64 / self.total as f64
             }
         }
-    }
-
-    /// Sets the current progress value.
-    ///
-    /// This is a builder method that consumes and returns `self`.
-    #[must_use]
-    pub const fn with_current(mut self, current: u64) -> Self {
-        self.current = current;
-        self
-    }
-
-    /// Sets an optional message describing the current progress.
-    ///
-    /// This is a builder method that consumes and returns `self`.
-    #[must_use]
-    pub fn with_message(mut self, message: impl Into<String>) -> Self {
-        self.message = Some(message.into());
-        self
-    }
-
-    /// Sets the state of the progress update.
-    ///
-    /// This is a builder method that consumes and returns `self`.
-    #[must_use]
-    pub const fn with_state(mut self, state: State) -> Self {
-        self.state = state;
-        self
     }
 
     /// Returns the remaining progress (total - current).
@@ -268,6 +248,18 @@ impl ProgressUpdate {
     pub const fn is_paused(&self) -> bool {
         matches!(self.state, State::Paused)
     }
+
+    /// Returns the optional descriptive message about the current progress.
+    #[must_use]
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
+    /// Returns the current state of the progress operation.
+    #[must_use]
+    pub const fn state(&self) -> State {
+        self.state
+    }
 }
 
 #[cfg(test)]
@@ -276,16 +268,16 @@ mod tests {
 
     #[test]
     fn test_progress_update_new() {
-        let update = ProgressUpdate::new(100);
-        assert_eq!(update.current, 0);
-        assert_eq!(update.total, 100);
+        let update = ProgressUpdate::new(100, 0, State::Working, None);
+        assert_eq!(update.current(), 0);
+        assert_eq!(update.total(), 100);
         assert!(!update.is_cancelled());
-        assert_eq!(update.message, None);
+        assert_eq!(update.message(), None);
     }
 
     #[test]
     fn test_completed_fraction() {
-        let mut update = ProgressUpdate::new(100);
+        let mut update = ProgressUpdate::new(100, 0, State::Working, None);
         assert!((update.completed_fraction() - 0.0).abs() < f64::EPSILON);
 
         update.current = 50;
@@ -297,19 +289,16 @@ mod tests {
 
     #[test]
     fn test_completed_fraction_zero_total() {
-        let update = ProgressUpdate::new(0);
+        let update = ProgressUpdate::new(0, 0, State::Working, None);
         assert!((update.completed_fraction() - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_builder_methods() {
-        let update = ProgressUpdate::new(100)
-            .with_current(50)
-            .with_message("Half complete")
-            .with_state(State::Working);
+        let update = ProgressUpdate::new(100, 50, State::Working, Some("Half complete".to_string()));
 
-        assert_eq!(update.current, 50);
-        assert_eq!(update.message, Some("Half complete".to_string()));
+        assert_eq!(update.current(), 50);
+        assert_eq!(update.message(), Some("Half complete"));
         assert_eq!(update.state, State::Working);
         assert!(update.is_working());
         assert!(!update.is_cancelled());
@@ -319,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_is_complete() {
-        let mut update = ProgressUpdate::new(100);
+        let mut update = ProgressUpdate::new(100, 0, State::Working, None);
         assert!(!update.is_completed());
         assert!(update.is_working());
 
@@ -339,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_remaining() {
-        let mut update = ProgressUpdate::new(100);
+        let mut update = ProgressUpdate::new(100, 0, State::Working, None);
         assert_eq!(update.remaining(), 100);
 
         update.current = 30;

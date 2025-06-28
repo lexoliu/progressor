@@ -34,14 +34,14 @@ async fn main() {
             while let Some(update) = progress_stream.next().await {
                 print!("\rProgress: {:.1}% ({}/{})",
                        update.completed_fraction() * 100.0,
-                       update.current,
-                       update.total);
+                       update.current(),
+                       update.total());
 
-                if let Some(message) = &update.message {
+                if let Some(message) = update.message() {
                     print!(" - {message}");
                 }
 
-                match update.state {
+                match update.state() {
                     State::Completed => {
                         println!("\n✅ Progress completed!");
                         break;

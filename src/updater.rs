@@ -18,66 +18,100 @@ use crate::{Progress, ProgressUpdate, State};
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 #[derive(Debug, Clone)]
 pub struct ProgressUpdater {
-    state: ProgressUpdate,
+    total: u64,
+    current: u64,
+    completed: bool,
     sender: Sender<ProgressUpdate>,
 }
 
 impl ProgressUpdater {
-    #[allow(clippy::missing_const_for_fn)]
-    fn new(total: u64, sender: Sender<ProgressUpdate>) -> Self {
-        let state = ProgressUpdate::new(total);
-        Self { state, sender }
+    const fn new(total: u64, sender: Sender<ProgressUpdate>) -> Self {
+        Self {
+            total,
+            current: 0,
+            completed: false,
+            sender,
+        }
     }
 
     /// Updates the progress with the given current value and message.
     ///
     /// This will broadcast the update to all progress stream listeners.
-    /// The message will be included in the progress update.
     pub fn update_with_message(&mut self, current: u64, message: impl Into<String>) {
-        self.state.state = State::Working;
-        self.state.current = current;
-        self.state.message = Some(message.into());
-        let _ = self.sender.try_broadcast(self.state.clone());
+        self.current = current;
+        let update = ProgressUpdate::new(self.total, current, State::Working, Some(message.into()));
+        self.broadcast(update);
     }
 
     /// Updates the progress with the given current value.
     ///
     /// This will broadcast the update to all progress stream listeners.
-    /// Any previous message will be cleared.
     pub fn update(&mut self, current: u64) {
-        self.state.state = State::Working;
-        self.state.current = current;
-        self.state.message = None;
-        let _ = self.sender.try_broadcast(self.state.clone());
+        self.current = current;
+        let update = ProgressUpdate::new(self.total, current, State::Working, None);
+        self.broadcast(update);
     }
 
     /// Pauses the progress operation.
     ///
     /// This method sets the progress state to paused and broadcasts the update to all listeners.
-    pub fn pause(&mut self) {
-        self.state.state = State::Paused;
-        let _ = self.sender.try_broadcast(self.state.clone());
+    pub fn pause(&self) {
+        let update = ProgressUpdate::new(self.total, self.current, State::Paused, None);
+        self.broadcast(update);
     }
 
-    /// Cancels the progress operation.
+    /// Marks the progress operation as completed.
     ///
-    /// This method signals cancellation; actual cancellation is handled automatically when the updater is dropped.
+    /// This method sets the completed flag and broadcasts a completion update.
+    /// Subsequent calls to this method have no effect.
+    pub fn complete(&mut self) {
+        if !self.completed {
+            self.completed = true;
+            let update = ProgressUpdate::new(self.total, self.current, State::Completed, None);
+            self.broadcast(update);
+        }
+    }
+
+    /// Pauses the progress operation with a descriptive message.
+    ///
+    /// This method sets the progress state to paused and broadcasts the update to all listeners.
+    pub fn pause_with_message(&self, message: impl Into<String>) {
+        let update = ProgressUpdate::new(
+            self.total,
+            self.current,
+            State::Paused,
+            Some(message.into()),
+        );
+        self.broadcast(update);
+    }
+
+    /// Updates the total expected value for the progress operation.
+    ///
+    /// This method changes the total value and broadcasts an update with the current progress.
+    pub fn set_total(&mut self, total: u64) {
+        self.total = total;
+        let update = ProgressUpdate::new(self.total, self.current, State::Working, None);
+        self.broadcast(update);
+    }
+
+    fn broadcast(&self, update: ProgressUpdate) {
+        let _ = self.sender.try_broadcast(update);
+    }
+    /// Cancels the progress operation.
     pub fn cancel(self) {
         // Drop will handle cancellation automatically
-    }
-
-    /// Gets the current progress state.
-    #[must_use]
-    pub const fn current_progress(&self) -> &ProgressUpdate {
-        &self.state
     }
 }
 
 impl Drop for ProgressUpdater {
     fn drop(&mut self) {
-        if !self.state.is_completed() {
-            self.state.state = State::Cancelled;
-            let _ = self.sender.try_broadcast(self.state.clone());
+        if !self.completed {
+            let _ = self.sender.try_broadcast(ProgressUpdate::new(
+                self.total,
+                self.current,
+                State::Cancelled,
+                None,
+            ));
         }
     }
 }
@@ -108,7 +142,7 @@ impl<Fut> Progress for ProgressFuture<Fut>
 where
     Fut: Future,
 {
-    fn progress(&self) -> impl Stream<Item = ProgressUpdate> + Send + 'static {
+    fn progress(&self) -> impl Stream<Item = ProgressUpdate> + Unpin + Send + 'static {
         self.receiver.clone()
     }
 }
@@ -143,7 +177,7 @@ where
 /// // Monitor progress - no need for Box::pin with Unpin
 /// let mut progress_stream = task.progress();
 /// while let Some(update) = progress_stream.next().await {
-///     match update.state {
+///     match update.state() {
 ///         State::Working => println!("Progress: {}%", (update.completed_fraction() * 100.0) as u32),
 ///         State::Paused => println!("Task paused at {}%", (update.completed_fraction() * 100.0) as u32),
 ///         State::Completed => println!("Task completed!"),
