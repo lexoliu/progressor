@@ -15,8 +15,6 @@ exclude = [
     "target/",
 ]
 
-rust-version = "1.85"
-
 [badges]
 maintenance = { status = "actively-developed" }
 
