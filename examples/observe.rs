@@ -8,11 +8,11 @@ async fn main() {
 
     // Create a simulated long-running task using the observe extension
     let result = progress(100, |mut updater| async move {
-        for i in 0..=100 {
+        for i in 0u64..=100 {
             // Simulate some work
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-            if i % 10 == 0 {
+            if i.is_multiple_of(10) {
                 updater.update_with_message(i, format!("Processing step {i}/100"));
             } else {
                 updater.update(i);
