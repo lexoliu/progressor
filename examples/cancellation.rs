@@ -1,7 +1,7 @@
 //! Example demonstrating progress tracking with cancellation and pause support.
 
 use futures_util::StreamExt;
-use progressor::{progress, Progress, State};
+use progressor::{Progress, State, progress};
 
 #[tokio::main]
 async fn main() {

@@ -1,7 +1,7 @@
 //! Basic example demonstrating progress tracking functionality.
 
 use futures_util::StreamExt;
-use progressor::{progress, Progress, State};
+use progressor::{Progress, State, progress};
 
 #[tokio::main]
 async fn main() {
