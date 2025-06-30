@@ -6,15 +6,54 @@
 //!
 //! # Features
 //!
-//! - **State-aware progress tracking**: Support for working, paused, completed, and cancelled states
-//! - **Async-first design**: Built around `Future` and `Stream` APIs
-//! - **Zero-cost abstractions**: Efficient progress reporting with minimal overhead
+//! - **Async-first**: Built around Rust's async/await and Stream APIs
+//! - **Zero-allocation progress updates**: Efficient progress reporting
+//! - **Flexible progress tracking**: Support for current/total, messages, and cancellation
 //! - **Type-safe**: Full Rust type safety with meaningful error messages
-//! - **Flexible**: Support for current/total values, custom messages, and state management
+//! - **Lightweight**: Minimal dependencies and fast compilation
+//! - **Convenient observing**: Extension methods for easy progress monitoring
 //!
 //! # Examples
 //!
-//! Basic usage with the progress tracker:
+//! ## Using the observe extension (recommended)
+//!
+//! The [`ProgressExt::observe`] method provides a convenient way to monitor progress
+//! without manually managing streams and select macros:
+//!
+//! ```
+//! # #[cfg(feature = "std")]
+//! # {
+//! use progressor::{progress, ProgressExt};
+//!
+//! # async fn example() {
+//! let result = progress(100, |mut updater| async move {
+//!     for i in 0..=100 {
+//!         // Update progress
+//!         updater.update(i);
+//!         
+//!         // Add messages for important milestones
+//!         if i % 25 == 0 {
+//!             updater.update_with_message(i, format!("Milestone: {}%", i));
+//!         }
+//!     }
+//!     "Task completed!"
+//! })
+//! .observe(|update| {
+//!     println!("Progress: {}%", (update.completed_fraction() * 100.0) as u32);
+//!     if let Some(message) = update.message() {
+//!         println!("  {}", message);
+//!     }
+//! })
+//! .await;
+//!
+//! println!("Result: {}", result);
+//! # }
+//! # }
+//! ```
+//!
+//! ## Manual stream monitoring with `tokio::select!`
+//!
+//! For more control, you can manually monitor the progress stream:
 //!
 //! ```
 //! # #[cfg(feature = "std")]
@@ -55,16 +94,17 @@
 //! # }
 //! ```
 //!
-//! Advanced usage with pause and cancel:
+//! ## Advanced usage with state handling
+//!
+//! Monitor different progress states and handle pause/cancel operations:
 //!
 //! ```
 //! # #[cfg(feature = "std")]
 //! # {
-//! use progressor::{progress, Progress, State};
-//! use futures_util::StreamExt;
+//! use progressor::{progress, ProgressExt, State};
 //!
 //! # async fn example() {
-//! let task = progress(100, |mut updater| async move {
+//! let result = progress(100, |mut updater| async move {
 //!     for i in 0..=100 {
 //!         // Update progress
 //!         updater.update(i);
@@ -77,30 +117,32 @@
 //!         }
 //!     }
 //!     "Task completed!"
-//! });
-//!
-//! // Monitor progress and handle different states
-//! let mut progress_stream = task.progress();
-//! while let Some(update) = progress_stream.next().await {
+//! })
+//! .observe(|update| {
 //!     match update.state() {
 //!         State::Working => println!("Working: {}%", (update.completed_fraction() * 100.0) as u32),
 //!         State::Paused => println!("Paused at {}%", (update.completed_fraction() * 100.0) as u32),
 //!         State::Completed => println!("Completed!"),
 //!         State::Cancelled => println!("Cancelled!"),
 //!     }
-//! }
+//! })
+//! .await;
+//!
+//! println!("Result: {}", result);
 //! # }
 //! # }
 //! ```
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod ext;
+pub use ext::ProgressExt;
 #[cfg(feature = "std")]
 mod updater;
 
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub use updater::{progress, ProgressUpdater};
+pub use updater::{ProgressUpdater, progress};
 
 use core::future::Future;
 use futures_core::Stream;

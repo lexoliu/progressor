@@ -1,0 +1,14 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Progress bars showing advancement -->
+  <rect x="20" y="40" width="88" height="8" fill="none" stroke="#666" stroke-width="2"/>
+  <rect x="20" y="40" width="60" height="8" fill="#007acc"/>
+  
+  <rect x="20" y="60" width="88" height="8" fill="none" stroke="#666" stroke-width="2"/>
+  <rect x="20" y="60" width="80" height="8" fill="#007acc"/>
+  
+  <rect x="20" y="80" width="88" height="8" fill="none" stroke="#666" stroke-width="2"/>
+  <rect x="20" y="80" width="88" height="8" fill="#007acc"/>
+  
+  <!-- Arrow indicating progression -->
+  <polygon points="108,50 118,64 108,78 112,64" fill="#ff6b35"/>
+</svg>
