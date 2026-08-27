@@ -2,26 +2,22 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
 
-env:
-  CARGO_TERM_COLOR: always
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
-  publish:
-    name: Publish to crates.io
+  release-plz:
+    name: Release
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install Rust stable
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Run tests
-      run: cargo test --all-features
-
-    - name: Publish to crates.io
-      run: cargo publish
-      env:
-        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: MarcoIeni/release-plz-action@v0.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
