@@ -7,7 +7,7 @@ async fn main() {
     println!("Starting progress tracking example...");
 
     // Create a simulated long-running task
-    let task = progress(100, |mut updater| async move {
+    let task = progress(Some(100), |mut updater| async move {
         for i in 0u64..=100 {
             // Simulate some work
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -18,6 +18,7 @@ async fn main() {
                 updater.update(i);
             }
         }
+        updater.complete();
         "Task completed successfully!"
     });
 
@@ -31,10 +32,15 @@ async fn main() {
         }
         () = async {
             while let Some(update) = progress_stream.next().await {
-                print!("\rProgress: {:.1}% ({}/{})",
-                       update.completed_fraction() * 100.0,
-                       update.current(),
-                       update.total());
+                if let (Some(fraction), Some(total)) = (update.completed_fraction(), update.total()) {
+                    print!(
+                        "\rProgress: {:.1}% ({}/{total})",
+                        fraction * 100.0,
+                        update.current()
+                    );
+                } else {
+                    print!("\rProgress: {}", update.current());
+                }
 
                 if let Some(message) = update.message() {
                     print!(" - {message}");
