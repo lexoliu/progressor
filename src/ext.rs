@@ -1,50 +1,63 @@
+use core::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll, Waker},
+};
+
+use futures_core::Stream;
 use futures_util::{FutureExt, StreamExt, pin_mut, select};
 
-use crate::{Progress, ProgressUpdate};
+use crate::Progress;
+
+fn drain_ready<S, T>(mut stream: Pin<&mut S>, receiver: &mut impl FnMut(T))
+where
+    S: Stream<Item = T>,
+{
+    let mut cx = Context::from_waker(Waker::noop());
+    while let Poll::Ready(Some(update)) = stream.as_mut().poll_next(&mut cx) {
+        receiver(update);
+    }
+}
 
 /// Extension trait providing convenient methods for observing progress updates.
 ///
-/// This trait extends the [`Progress`] trait with methods that make it easier to
-/// observe progress updates without manually managing the progress stream.
+/// This trait extends [`Progress`] with methods that monitor progress updates
+/// concurrently with the future without manually wiring `select!` loops.
 pub trait ProgressExt: Progress {
-    /// Observes progress updates while the future executes, calling the provided receiver
-    /// function for each update.
+    /// Observes progress updates while the future executes, calling `receiver`
+    /// for each update.
     ///
-    /// This method monitors the progress stream concurrently with the main future execution.
-    /// The receiver function will be called for each progress update until the future completes.
-    ///
-    /// # Parameters
-    ///
-    /// - `receiver`: A function that will be called with each [`ProgressUpdate`]
-    ///
-    /// # Returns
-    ///
-    /// Returns a future that resolves to the same output as the original future.
+    /// When the future completes, any unseen snapshot already ready in the progress
+    /// stream is drained and passed to `receiver` before returning the future's output.
     ///
     /// # Example
     ///
     /// ```
     /// # #[cfg(feature = "std")]
     /// # {
-    /// use progressor::{progress, ProgressExt};
+    /// use progressor::{ProgressExt, progress};
     ///
     /// # async fn example() {
-    /// let task = progress(100, |mut updater| async move {
+    /// let task = progress(Some(100), |mut updater| async move {
     ///     for i in 0..=100 {
     ///         updater.update(i);
     ///     }
+    ///     updater.complete();
     ///     "Done"
     /// });
     ///
+    /// let mut seen = 0_u64;
     /// let result = task.observe(|update| {
-    ///     println!("Progress: {}%", (update.completed_fraction() * 100.0) as u32);
+    ///     seen = update.current();
     /// }).await;
+    /// assert_eq!(result, "Done");
+    /// assert_eq!(seen, 100);
     /// # }
     /// # }
     /// ```
     fn observe(
         self,
-        receiver: impl Fn(ProgressUpdate) + Send,
+        mut receiver: impl FnMut(Self::Update) + Send,
     ) -> impl Future<Output = Self::Output> + Send
     where
         Self: Send + Sized,
@@ -56,7 +69,10 @@ pub trait ProgressExt: Progress {
 
             loop {
                 select! {
-                    result = future => return result,
+                    result = future => {
+                        drain_ready(progress_stream.as_mut(), &mut receiver);
+                        return result;
+                    }
                     update = progress_stream.next() => {
                         if let Some(update) = update {
                             receiver(update);
@@ -69,40 +85,38 @@ pub trait ProgressExt: Progress {
 
     /// Local version of [`observe`](Self::observe) that doesn't require `Send` bounds.
     ///
-    /// This method is similar to [`observe`](Self::observe) but works with non-`Send`
-    /// closures and futures. It's useful when you don't need to move the observer
-    /// across thread boundaries.
-    ///
-    /// # Parameters
-    ///
-    /// - `receiver`: A function that will be called with each [`ProgressUpdate`]
-    ///
-    /// # Returns
-    ///
-    /// Returns a future that resolves to the same output as the original future.
+    /// Works with non-`Send` closures and futures, and likewise drains any ready final
+    /// snapshot from the progress stream once the future resolves.
     ///
     /// # Example
     ///
     /// ```
     /// # #[cfg(feature = "std")]
     /// # {
-    /// use progressor::{progress, ProgressExt};
+    /// use progressor::{ProgressExt, progress};
     ///
     /// # async fn example() {
-    /// let task = progress(100, |mut updater| async move {
+    /// let task = progress(Some(100), |mut updater| async move {
     ///     for i in 0..=100 {
     ///         updater.update(i);
     ///     }
+    ///     updater.complete();
     ///     "Done"
     /// });
     ///
+    /// let mut seen = 0_u64;
     /// let result = task.observe_local(|update| {
-    ///     println!("Progress: {}%", (update.completed_fraction() * 100.0) as u32);
+    ///     seen = update.current();
     /// }).await;
+    /// assert_eq!(result, "Done");
+    /// assert_eq!(seen, 100);
     /// # }
     /// # }
     /// ```
-    fn observe_local(self, receiver: impl Fn(ProgressUpdate)) -> impl Future<Output = Self::Output>
+    fn observe_local(
+        self,
+        mut receiver: impl FnMut(Self::Update),
+    ) -> impl Future<Output = Self::Output>
     where
         Self: Sized,
     {
@@ -113,7 +127,10 @@ pub trait ProgressExt: Progress {
 
             loop {
                 select! {
-                    result = future => return result,
+                    result = future => {
+                        drain_ready(progress_stream.as_mut(), &mut receiver);
+                        return result;
+                    }
                     update = progress_stream.next() => {
                         if let Some(update) = update {
                             receiver(update);

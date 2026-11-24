@@ -7,7 +7,7 @@ async fn main() {
     println!("Starting observe extension example...");
 
     // Create a simulated long-running task using the observe extension
-    let result = progress(100, |mut updater| async move {
+    let result = progress(Some(100), |mut updater| async move {
         for i in 0u64..=100 {
             // Simulate some work
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -26,16 +26,19 @@ async fn main() {
                 updater.update_with_message(i, "Resuming...".to_string());
             }
         }
+        updater.complete();
         "Task completed successfully!"
     })
     .observe(|update| {
-        // This closure is called for each progress update
-        print!(
-            "\rProgress: {:.1}% ({}/{})",
-            update.completed_fraction() * 100.0,
-            update.current(),
-            update.total()
-        );
+        if let (Some(fraction), Some(total)) = (update.completed_fraction(), update.total()) {
+            print!(
+                "\rProgress: {:.1}% ({}/{total})",
+                fraction * 100.0,
+                update.current()
+            );
+        } else {
+            print!("\rProgress: {}", update.current());
+        }
 
         if let Some(message) = update.message() {
             print!(" - {message}");
