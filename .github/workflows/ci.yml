@@ -1,40 +1,82 @@
 name: CI
 
+permissions:
+  contents: read
+  checks: write
+
 on:
-  push:
-    branches: [ main, dev ]
   pull_request:
+    branches: ["**"]
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test
+  bump:
+    # release-plz bump branches (`release-plz-*`) run nothing heavy: this job
+    # skips itself and `test` skips through `needs: bump`, while `ci-result`
+    # still reports the single required `CI result` status check on `main`.
+    name: Not a release bump
+    if: ${{ !startsWith(github.head_ref || github.ref_name, 'release-plz-') }}
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - run: echo "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} runs the full set"
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
+  test:
+    name: Test
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-    - uses: Swatinem/rust-cache@v2
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-    - name: Check formatting
-      run: cargo fmt --all -- --check
+      - uses: water-rs/stow@main
 
-    - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
-    - uses: taiki-e/install-action@nextest
+      - name: Run clippy (all features)
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-    - name: Run tests
-      run: cargo nextest run --all-features
+      - name: Run clippy (no-std core)
+        run: cargo clippy --lib --no-default-features -- -D warnings
 
-    - name: Run doctests
-      run: cargo test --doc --all-features
+      - uses: taiki-e/install-action@nextest
 
-    - name: Check documentation
-      run: cargo doc --all-features --no-deps
+      - name: Run tests
+        run: cargo nextest run --all-features
+
+      - name: Run doctests
+        run: cargo test --doc --all-features
+
+      - name: Check documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --all-features --no-deps
+
+  ci-result:
+    name: CI result
+    if: always()
+    needs: [bump, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        env:
+          RESULTS: ${{ join(needs.*.result, ', ') }}
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "job results: $RESULTS"
+          if [ "$FAILED" = "true" ]; then
+            echo "::error::one or more jobs failed or were cancelled"
+            exit 1
+          fi

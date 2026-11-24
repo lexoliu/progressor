@@ -1,30 +1,75 @@
 name: Release
 
+# Every push to `main` runs both jobs: `release` publishes what the push
+# carries (the required `CI result` check on `main` already guarantees the
+# merged commit passed CI), and `release-pr` opens or refreshes the version
+# bump and changelog pull request against `main`. Merging that pull request
+# is the release.
 on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
-
 jobs:
-  release-plz:
-    name: Release
+  release:
+    name: Publish release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+      checks: read
+      id-token: write
+    concurrency:
+      group: release-publish-main
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout the pushed main commit
+        uses: actions/checkout@v6
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      # Mint a short-lived crates.io token from the GitHub OIDC identity
-      # instead of a stored CARGO_REGISTRY_TOKEN (trusted publishing is
-      # configured per crate on crates.io).
+          persist-credentials: false
+      - &rust-toolchain
+        name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: water-rs/stow@main
       - uses: rust-lang/crates-io-auth-action@v1
         id: crates-io-auth
-      - uses: MarcoIeni/release-plz-action@v0.5
+      - name: Publish unpublished crate version
+        uses: release-plz/action@v0.5
+        with:
+          command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
 
+  release-pr:
+    name: Prepare next release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    concurrency:
+      group: release-plz-pr
+      cancel-in-progress: false
+    steps:
+      - name: Checkout the pushed main commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - *rust-toolchain
+      - uses: water-rs/stow@main
+      - name: Create or update release PR
+        id: release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Approve the release PR's CI
+        if: steps.release-plz.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.release-plz.outputs.pr }}
+        run: bash .github/scripts/approve-held-runs.sh "$(jq -er .number <<<"$PR")"
